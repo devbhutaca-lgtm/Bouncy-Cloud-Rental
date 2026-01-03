@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect } from 'react';
-import { Header } from './components/Header';
-import { BookingCalendar } from './components/BookingCalendar';
-import { BookingForm } from './components/BookingForm';
-import { AdminPanel } from './components/AdminPanel';
-import { Booking, BookingFormState, ViewType } from './types';
-import { generateConfirmationEmail } from './services/geminiService';
-import { CheckCircle2, Cloud, Sparkles, AlertCircle, Package, Wind, Brush, Send, CheckCircle, Loader2, ExternalLink, Lock } from 'lucide-react';
+import { Header } from './components/Header.tsx';
+import { BookingCalendar } from './components/BookingCalendar.tsx';
+import { BookingForm } from './components/BookingForm.tsx';
+import { AdminPanel } from './components/AdminPanel.tsx';
+import { Booking, BookingFormState, ViewType } from './types.ts';
+import { generateConfirmationEmail } from './services/geminiService.ts';
+import { CheckCircle2, Cloud, Sparkles, AlertCircle, Package, Wind, Brush, Send, CheckCircle, Loader2, Lock } from 'lucide-react';
 import { eachDayOfInterval, parseISO, format, differenceInDays } from 'date-fns';
 
 const INITIAL_FORM_STATE: BookingFormState = {
@@ -65,12 +65,11 @@ const App: React.FC = () => {
       if (!response.ok) throw new Error("Failed to fetch Google Sheet CSV. Make sure it is 'Published to Web' as CSV.");
       
       const csvText = await response.text();
-      const rows = csvText.split('\n').slice(1); // Skip header
+      const rows = csvText.split('\n').slice(1);
       
       const sheetBookings: Booking[] = rows
         .filter(row => row.trim().length > 0)
         .map(row => {
-          // Basic CSV parsing (splitting by comma, not accounting for quoted commas for simplicity)
           const cols = row.split(',');
           return {
             id: cols[0] || Math.random().toString(36).substr(2, 9),
@@ -89,7 +88,6 @@ const App: React.FC = () => {
           };
         });
 
-      // Merge: Local bookings take priority for recent items, but Sheet is source of truth for history
       const merged = [...sheetBookings];
       bookings.forEach(local => {
         if (!merged.find(m => m.id === local.id)) {
@@ -101,7 +99,7 @@ const App: React.FC = () => {
       showToast("Successfully synced with Google Sheets!", 'success');
     } catch (error) {
       console.error("Sync Error:", error);
-      showToast("Sync failed. Ensure Sheet is 'Published to Web' as CSV.", 'info');
+      showToast("Sync failed. Check console or publish settings.", 'info');
     }
   };
 
@@ -193,7 +191,7 @@ const App: React.FC = () => {
   };
 
   const handleCancel = (id: string) => {
-    const confirm = window.confirm("Are you sure you want to cancel this booking? This will open up the dates for other customers.");
+    const confirm = window.confirm("Are you sure you want to cancel this booking?");
     if (confirm) {
       const updated = bookings.map(b => 
         b.id === id ? { ...b, status: 'cancelled' as const } : b
