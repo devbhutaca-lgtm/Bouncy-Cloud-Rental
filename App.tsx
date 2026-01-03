@@ -20,8 +20,8 @@ const INITIAL_FORM_STATE: BookingFormState = {
   comments: '',
 };
 
-// Simple admin protection
 const ADMIN_PASSWORD = 'bouncy-admin';
+const SHEET_CSV_URL = "https://docs.google.com/spreadsheets/d/1z34r7YxyH8ooATD6dhfcWAPJG3LA0z9N5QOg3ekU2yM/export?format=csv&gid=0";
 
 const App: React.FC = () => {
   const [view, setView] = useState<ViewType>('customer');
@@ -60,25 +60,63 @@ const App: React.FC = () => {
   };
 
   const handleSyncWithSheets = async () => {
-    // In a real application, you would fetch the CSV version of the sheet:
-    // https://docs.google.com/spreadsheets/d/1z34r7YxyH8ooATD6dhfcWAPJG3LA0z9N5QOg3ekU2yM/export?format=csv&gid=0
-    // For now, we simulate a successful sync
-    return new Promise<void>((resolve) => {
-      setTimeout(() => {
-        showToast("Synced with Google Sheets successfully!", 'success');
-        resolve();
-      }, 1500);
-    });
+    try {
+      const response = await fetch(SHEET_CSV_URL);
+      if (!response.ok) throw new Error("Failed to fetch Google Sheet CSV. Make sure it is 'Published to Web' as CSV.");
+      
+      const csvText = await response.text();
+      const rows = csvText.split('\n').slice(1); // Skip header
+      
+      const sheetBookings: Booking[] = rows
+        .filter(row => row.trim().length > 0)
+        .map(row => {
+          // Basic CSV parsing (splitting by comma, not accounting for quoted commas for simplicity)
+          const cols = row.split(',');
+          return {
+            id: cols[0] || Math.random().toString(36).substr(2, 9),
+            firstName: cols[1] || 'Unknown',
+            lastName: cols[2] || '',
+            email: cols[3] || '',
+            phone: cols[4] || '',
+            address: cols[5] || '',
+            startDate: cols[6] || format(new Date(), 'yyyy-MM-dd'),
+            endDate: cols[7] || format(new Date(), 'yyyy-MM-dd'),
+            totalPrice: Number(cols[8]) || 0,
+            deposit: Number(cols[9]) || 100,
+            status: (cols[10]?.trim().toLowerCase() === 'cancelled' ? 'cancelled' : 'confirmed') as 'confirmed' | 'cancelled',
+            comments: cols[11] || '',
+            createdAt: new Date().toISOString(),
+          };
+        });
+
+      // Merge: Local bookings take priority for recent items, but Sheet is source of truth for history
+      const merged = [...sheetBookings];
+      bookings.forEach(local => {
+        if (!merged.find(m => m.id === local.id)) {
+          merged.push(local);
+        }
+      });
+
+      saveBookings(merged);
+      showToast("Successfully synced with Google Sheets!", 'success');
+    } catch (error) {
+      console.error("Sync Error:", error);
+      showToast("Sync failed. Ensure Sheet is 'Published to Web' as CSV.", 'info');
+    }
   };
 
   const getAllBookedDates = () => {
     const allDates: string[] = [];
     bookings.filter(b => b.status === 'confirmed').forEach(b => {
-      const interval = eachDayOfInterval({ 
-        start: parseISO(b.startDate), 
-        end: parseISO(b.endDate) 
-      });
-      interval.forEach(d => allDates.push(format(d, 'yyyy-MM-dd')));
+      try {
+        const interval = eachDayOfInterval({ 
+          start: parseISO(b.startDate), 
+          end: parseISO(b.endDate) 
+        });
+        interval.forEach(d => allDates.push(format(d, 'yyyy-MM-dd')));
+      } catch (e) {
+        console.warn("Invalid booking dates skipped", b);
+      }
     });
     return allDates;
   };
@@ -95,9 +133,7 @@ const App: React.FC = () => {
         showToast('Admin Access Granted', 'success');
       } else {
         alert('Incorrect password. Access denied.');
-        if (window.location.hash === '#admin') {
-          window.location.hash = '';
-        }
+        if (window.location.hash === '#admin') window.location.hash = '';
       }
     } else {
       setView(newView);
@@ -114,7 +150,6 @@ const App: React.FC = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
     const interval = eachDayOfInterval({ 
       start: parseISO(formData.startDate), 
       end: parseISO(formData.endDate) 
@@ -127,7 +162,6 @@ const App: React.FC = () => {
     }
 
     setIsLoading(true);
-
     try {
       const days = differenceInDays(parseISO(formData.endDate), parseISO(formData.startDate)) + 1;
       const newBooking: Booking = {
@@ -141,24 +175,20 @@ const App: React.FC = () => {
 
       const updatedBookings = [...bookings, newBooking];
       saveBookings(updatedBookings);
-
       setIsLoading(false);
       setShowSuccess(true);
       setIsSendingEmail(true);
 
       const draft = await generateConfirmationEmail(newBooking);
       setEmailDraft(draft);
-
       setTimeout(() => {
         setIsSendingEmail(false);
         showToast(`Email confirmation sent to ${newBooking.email}!`, 'success');
         setFormData(INITIAL_FORM_STATE);
       }, 2000);
-
     } catch (error) {
-      console.error("Booking error:", error);
-      alert("Failed to process booking.");
       setIsLoading(false);
+      alert("Failed to process booking.");
     }
   };
 
@@ -176,7 +206,6 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       <Header view={view} setView={handleSetView} />
-
       {toast && (
         <div className="fixed top-20 right-4 z-[100] animate-in slide-in-from-right fade-in duration-300">
           <div className={`px-6 py-4 rounded-2xl shadow-2xl border flex items-center gap-3 ${
@@ -187,7 +216,6 @@ const App: React.FC = () => {
           </div>
         </div>
       )}
-
       <main className="flex-grow">
         {view === 'customer' ? (
           <div className="max-w-6xl mx-auto px-4 py-12">
@@ -207,14 +235,12 @@ const App: React.FC = () => {
                       Select your dates below. Only <span className="font-bold text-slate-900">$50/day</span>. 
                     </p>
                   </div>
-
                   <BookingCalendar 
                     startDate={formData.startDate}
                     endDate={formData.endDate}
                     onRangeSelect={(start, end) => setFormData(prev => ({ ...prev, startDate: start, endDate: end }))}
                     bookedDates={bookedDatesList}
                   />
-
                   <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
                     <h3 className="font-bold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
                       <AlertCircle size={18} className="text-blue-600" />
@@ -238,7 +264,6 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 </div>
-
                 <div className="lg:col-span-7">
                   <div className="bg-white rounded-3xl p-8 shadow-xl shadow-slate-200/50 border border-slate-100">
                     <h2 className="text-2xl font-bold text-slate-900 mb-6">Reservation Details</h2>
@@ -282,10 +307,7 @@ const App: React.FC = () => {
                     </div>
                   )}
                   <div className="mt-10 pt-8 border-t border-slate-100">
-                    <button 
-                      onClick={() => setShowSuccess(false)} 
-                      className="w-full px-8 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all"
-                    >
+                    <button onClick={() => setShowSuccess(false)} className="w-full px-8 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all">
                       Back to Booking
                     </button>
                   </div>
@@ -296,23 +318,14 @@ const App: React.FC = () => {
         ) : (
           <div className="relative">
             <div className="absolute top-4 right-4 z-[100]">
-               <button 
-                onClick={handleAdminLogout}
-                className="px-4 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg text-sm font-bold transition-all flex items-center gap-2"
-               >
-                 <Lock size={14} />
-                 Logout Admin
+               <button onClick={handleAdminLogout} className="px-4 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-lg text-sm font-bold transition-all flex items-center gap-2">
+                 <Lock size={14} /> Logout Admin
                </button>
             </div>
-            <AdminPanel 
-              bookings={bookings} 
-              onCancelBooking={handleCancel} 
-              onSyncWithSheets={handleSyncWithSheets}
-            />
+            <AdminPanel bookings={bookings} onCancelBooking={handleCancel} onSyncWithSheets={handleSyncWithSheets} />
           </div>
         )}
       </main>
-
       <footer className="bg-white border-t border-slate-200 py-10 mt-auto">
         <div className="max-w-7xl mx-auto px-4 text-center">
           <div className="flex items-center justify-center gap-2 mb-4 text-slate-400">
@@ -320,12 +333,8 @@ const App: React.FC = () => {
             <span className="font-bold text-slate-500 uppercase tracking-tighter">Bouncy Cloud Rentals</span>
           </div>
           <p className="text-sm text-slate-400">© {new Date().getFullYear()} Bouncy Cloud. Safe, Clean, Fun.</p>
-          
           <div className="mt-6 pt-6 border-t border-slate-50">
-            <button 
-              onClick={() => handleSetView('admin')}
-              className="text-[10px] text-slate-300 hover:text-slate-500 transition-colors uppercase tracking-[0.2em] font-medium"
-            >
+            <button onClick={() => handleSetView('admin')} className="text-[10px] text-slate-300 hover:text-slate-500 transition-colors uppercase tracking-[0.2em] font-medium">
               Business Partner Login
             </button>
           </div>
